@@ -73,7 +73,7 @@ public class FujitsuApiImpl implements FujitsuApi {
     private volatile AtomicBoolean unexpectedWeightChangeMonitorEnabled = new AtomicBoolean(false);
     private volatile UnexpectedWeightResponse lastUnexpectedWeightChange;
     
-    private List<Device> cashDevices;
+    private List<Device> cashDevices = new ArrayList<Device>();
     
 	
 	private void setCashUnitDevices(List<Device> devices) {
@@ -121,6 +121,7 @@ public class FujitsuApiImpl implements FujitsuApi {
                     restTemplate.getForObject(request.toUri(), AcceptMoneyResponse.class);        							
 				} catch (Exception e) {
 					// TODO: handle exception
+					System.out.println(e.getMessage());
 				}
         	}
         });
@@ -192,7 +193,7 @@ public class FujitsuApiImpl implements FujitsuApi {
 	        DeviceCashUnitResponse resp = restTemplate.getForObject(request.toUri(),DeviceCashUnitResponse.class);
 	        
 	        if (resp.getStatus() == 0) {
-	        	cashUnits.add(resp.getCashUnits());
+	        	cashUnits.addAll(resp.getCashUnits());
 	        }
 		}
 		

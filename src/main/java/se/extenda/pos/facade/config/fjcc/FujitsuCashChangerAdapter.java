@@ -123,15 +123,34 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 	}
 
 	@Override
-	public boolean canDispense(PosAccessor arg0, BigDecimal arg1) throws PeripheralException {
+	public boolean canDispense(PosAccessor posAccessor, BigDecimal dispenseAmount) throws PeripheralException {
 		Logger.info(this, "canDispense");
 		
-		// get all cash units
-		List<CashUnit> cashUnits = api.getDeviceCashUnits();
+		if (dispenseAmount.compareTo(BigDecimal.ZERO) < 1) {
+			return true;
+		}
 		
+		long dispenseSmallestDenomAmount = dispenseAmount.multiply(new BigDecimal(smallestDenominationFactor)).longValue(); 
 		
-		
-		//TODO: We probabaly need to calculate if dispense is possible by calling the getAcceptMoneyState do some calculations.
+		try {
+			// get all cash units
+			List<CashUnit> cashUnits = api.getDeviceCashUnits();
+			
+			// get the sum of all denominations
+			long totalSum = 0;
+			
+			for (CashUnit cashUnit : cashUnits) {
+				totalSum += cashUnit.getDenomination()*cashUnit.getCount();
+			}
+			
+			if (dispenseSmallestDenomAmount > totalSum) {
+				return false;
+			}
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+
 		return true;
 	}
 
@@ -149,6 +168,8 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 		try {
 			setCurrency(posAccessor);
 
+			//TODO: For Refund, shouldn't already inserted cash be trollbacked as well. Is that taken care of in ejectInsertedCash, or should this be taken
+			// care of here as well?
 			
 			DispenseMoneyResponse resp = api.dispenseMoney(getAmountInSmallestDenomination(dispenseAmount),this.currency);
 
@@ -166,6 +187,7 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 				api.stopAcceptMoney();
 			} else {
 				api.stopAcceptMoney();
+				posAccessor.getUI().getCashierPrompter().showErrorMessage("CashChanger", "Unable to dispense money");
 				throw new PeripheralException("Unable to dispense money");
 			
 			}
