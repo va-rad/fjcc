@@ -3,7 +3,10 @@ package se.extenda.pos.facade.config.fjcc;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
+
+import javax.annotation.PostConstruct;
 
 import org.springframework.stereotype.Component;
 
@@ -33,19 +36,18 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 	// Is the factor the local currency needs to be multiplied with to get the smallest 
     // denomination of the local currency
     // TODO: This needs to be configurable for each currency!
+	// TODO: This is now hardcoded for EUR!!
     private int smallestDenominationFactor = 100;
     
     private String currency;
 	
-//	@PostConstruct
-//	public void init() {
-//		// TODO: This is now hardcoded for EUR!!
-//		this.smallestDenominationFactor = 100;
-//		
-//		if (this.api == null) {
-//			this.api = new FujitsuApiImpl();
-//		}
-//	}
+	@PostConstruct
+	public void init() {
+		
+		if (this.api == null) {
+			this.api = new FujitsuApiImpl();
+		}
+	}
 	
 	private void setCurrency(PosAccessor posAccessor) {
 		if (this.currency == null || this.currency.isEmpty()) {
@@ -71,13 +73,12 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 		Logger.info(this, "acceptInsertedCash");
 		
 		try {
-			setCurrency(posAccessor);
-		
-			api.dispenseMoney(getAmountInSmallestDenomination(dispenseBeforeAccept),this.currency);
-			
-			api.stopAcceptMoney();
-			
-			beginAcceptingCash(posAccessor);
+			AcceptMoneyStateResponse stopResp = api.stopAcceptMoney();
+
+			if (dispenseBeforeAccept.compareTo(BigDecimal.ZERO) > 0) {
+				setCurrency(posAccessor);
+				DispenseMoneyResponse dispResp = api.dispenseMoney(getAmountInSmallestDenomination(dispenseBeforeAccept),this.currency);
+			}
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -88,20 +89,16 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 	@Override
 	public void beginAcceptingCash(PosAccessor posAccessor) throws PeripheralException {
 		Logger.info(this, "beginAcceptingCash");
-		
-		if (this.api == null) {
-			this.api = new FujitsuApiImpl();
-		}
 
 		PromptControl prompter = null;
 		
 		try {
 			prompter = posAccessor.getUI().getCashierPrompter().showProgress("CashChanger", "Connecting to cashchanger");
 			
-			// check the state of the cc before
-			api.acceptMoney(1000000000);
-			
-			// check the state of the cc after to see that everything went okay
+			// Start accepting cash in the cashchanger. Need to add a max amount. Add a very large number since we don't
+			// want the cashchanger to finalize this method by it self, we always use stopAcceptMoney instead.
+			api.acceptMoney(smallestDenominationFactor*1000000);
+
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -121,6 +118,7 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 		Logger.info(this, "beginReplenish");
 		
 	}
+	
 
 	@Override
 	public boolean canDispense(PosAccessor posAccessor, BigDecimal dispenseAmount) throws PeripheralException {
@@ -131,27 +129,63 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 		}
 		
 		long dispenseSmallestDenomAmount = dispenseAmount.multiply(new BigDecimal(smallestDenominationFactor)).longValue(); 
-		
+
+		List<CashUnit> cashUnits = null;
+
 		try {
 			// get all cash units
-			List<CashUnit> cashUnits = api.getDeviceCashUnits();
+			cashUnits = api.getDeviceCashUnits();
 			
-			// get the sum of all denominations
-			long totalSum = 0;
-			
-			for (CashUnit cashUnit : cashUnits) {
-				totalSum += cashUnit.getDenomination()*cashUnit.getCount();
-			}
-			
-			if (dispenseSmallestDenomAmount > totalSum) {
+			if (cashUnits == null) {
 				return false;
 			}
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
+			
 
-		return true;
+		/*
+		 * Check if the cashchanger contains denominations to be able to dispense the correct amount
+		 */
+		// Sort cashUnits per denomination, the largest denom first
+		Collections.sort(cashUnits);
+
+		String msg = "Can dispense with denomination:\n";
+		long remainingDispenseAmount = dispenseSmallestDenomAmount;
+		boolean finished = false;
+		for (CashUnit cashUnit : cashUnits) {
+			long denomination = cashUnit.getDenomination();
+			long count=0;
+
+			try {
+				for (int j = 0; j < cashUnit.getCount(); j++) {
+					long rem = remainingDispenseAmount - cashUnit.getDenomination();
+					
+					if (rem > 0) {
+						count++;
+						remainingDispenseAmount = rem;
+					} else if (rem == 0) {
+						count++;
+						finished = true;
+						break;
+					} else {
+						break;
+					} 
+				}
+			} finally {
+				if (count > 0) {
+					msg += String.valueOf(denomination) + ": " + String.valueOf(count) + "\n";				
+				}
+				
+				if (finished) {
+					Logger.info(this, msg);
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 
 	@Override
@@ -168,25 +202,26 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 		try {
 			setCurrency(posAccessor);
 
+			api.stopAcceptMoney();
+
 			//TODO: For Refund, shouldn't already inserted cash be trollbacked as well. Is that taken care of in ejectInsertedCash, or should this be taken
 			// care of here as well?
 			
 			DispenseMoneyResponse resp = api.dispenseMoney(getAmountInSmallestDenomination(dispenseAmount),this.currency);
 
-			/*
+			
+			/* 
+			 * Check if success
+			 * 			
 			 * 0 – Success, 
 			 * 1 - GeneralError,
 			 * 2 – NotEnoughMoney
 			 */
-			
-			// if success
 			if (resp != null && resp.getStatus() == 0) {
 				if (acceptMoreMoney) {
 					beginAcceptingCash(posAccessor);				
 				}
-				api.stopAcceptMoney();
 			} else {
-				api.stopAcceptMoney();
 				posAccessor.getUI().getCashierPrompter().showErrorMessage("CashChanger", "Unable to dispense money");
 				throw new PeripheralException("Unable to dispense money");
 			
@@ -205,6 +240,8 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 		
 		try {
 			api.rollbackAcceptedMoney();
+
+			
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -217,6 +254,7 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 	public void endDeposit(PosAccessor arg0, int arg1) throws PeripheralException {
 		Logger.info(this, "endDeposit");
 		
+		// Do nothing?
 	}
 
 	@Override
@@ -246,7 +284,7 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 	@Override
 	public CashbackActionType getCashbackActionType(PosAccessor arg0) {
 		Logger.info(this, "getCashbackActionType");
-		return CashbackActionType.POST_FINALIZATION;
+		return CashbackActionType.POST_TENDER;
 	}
 
 	@Override

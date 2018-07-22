@@ -120,8 +120,8 @@ public class FujitsuApiImpl implements FujitsuApi {
         		try {
                     restTemplate.getForObject(request.toUri(), AcceptMoneyResponse.class);        							
 				} catch (Exception e) {
-					// TODO: handle exception
-					System.out.println(e.getMessage());
+					// Don't do anything about this.
+					// AcceptMoney can respond quickly or not at all.
 				}
         	}
         });

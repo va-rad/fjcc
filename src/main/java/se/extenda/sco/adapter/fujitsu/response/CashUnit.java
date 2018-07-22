@@ -6,7 +6,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
  * Representation of a CashUnit in /api/CashDevice/AcceptMoney
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class CashUnit {
+public class CashUnit implements Comparable<CashUnit> {
 	
 	/** Enumeration of different cashunit types, kept as constants for now */
 	public static final String CASHUNIT_TYPE_COIN = "Coin";
@@ -152,5 +152,10 @@ public class CashUnit {
 	public String toString() {
 		return " CashUnit {denomination=" + denomination + ", cashUnitType=" + cashUnitType
 				+ ", currency=" + currency + ", count=" + count + "}";
+	}
+
+	@Override
+	public int compareTo(CashUnit cashUnit) {
+		return (int) (cashUnit.denomination - this.denomination); 
 	}
 }
