@@ -20,7 +20,9 @@ import se.extenda.pos.facade.api.Logger;
 import se.extenda.pos.facade.api.PosAccessor;
 import se.extenda.pos.facade.api.Session;
 import se.extenda.pos.facade.api.Transaction;
+import se.extenda.pos.facade.api.contexts.AfterOrderFinalizedContext;
 import se.extenda.pos.facade.api.ui.PromptControl;
+import se.extenda.pos.facade.spi.actions.AfterOrderFinalizedAction;
 import se.extenda.pos.facade.spi.peripherals.cashchanger.CashChangerAdapter;
 import se.extenda.pos.facade.spi.peripherals.cashchanger.CashChangerDenomination;
 import se.extenda.pos.facade.spi.peripherals.cashchanger.CashChangerOverdispenceException;
@@ -29,7 +31,7 @@ import se.extenda.pos.facade.spi.peripherals.cashchanger.CashbackActionType;
 import se.extenda.pos.facade.spi.peripherals.cashchanger.PeripheralException;
 
 @Component
-public class FujitsuCashChangerAdapter implements CashChangerAdapter {
+public class FujitsuCashChangerAdapter implements CashChangerAdapter, AfterOrderFinalizedAction {
 	
 	private FujitsuApi api;
 
@@ -63,9 +65,9 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 	}
 
 	@Override
-	public void abortReplenish(PosAccessor arg0) throws PeripheralException {
-		// TODO Auto-generated method stub
-		
+	public void abortReplenish(PosAccessor posAccessor) throws PeripheralException {
+		Logger.info(this, "abortReplenish");
+				
 	}
 
 	@Override
@@ -108,27 +110,27 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 	}
 
 	@Override
-	public void beginAcceptingCashForExchange(PosAccessor arg0) throws PeripheralException {
+	public void beginAcceptingCashForExchange(PosAccessor posAccessor) throws PeripheralException {
 		Logger.info(this, "beginAcceptingCashForExchange");
 		
 	}
 
 	@Override
-	public void beginReplenish(PosAccessor arg0) throws PeripheralException {
+	public void beginReplenish(PosAccessor posAccessor) throws PeripheralException {
 		Logger.info(this, "beginReplenish");
 		
 	}
 	
 
 	@Override
-	public boolean canDispense(PosAccessor posAccessor, BigDecimal dispenseAmount) throws PeripheralException {
+	public boolean canDispense(PosAccessor posAccessor, BigDecimal amountToDispense) throws PeripheralException {
 		Logger.info(this, "canDispense");
 		
-		if (dispenseAmount.compareTo(BigDecimal.ZERO) < 1) {
+		if (amountToDispense.compareTo(BigDecimal.ZERO) < 1) {
 			return true;
 		}
 		
-		long dispenseSmallestDenomAmount = dispenseAmount.multiply(new BigDecimal(smallestDenominationFactor)).longValue(); 
+		long dispenseSmallestDenomAmount = amountToDispense.multiply(new BigDecimal(smallestDenominationFactor)).longValue(); 
 
 		List<CashUnit> cashUnits = null;
 
@@ -195,20 +197,19 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 	}
 
 	@Override
-	public void dispense(PosAccessor posAccessor, BigDecimal dispenseAmount, boolean acceptMoreMoney) throws PeripheralException {
+	public void dispense(PosAccessor posAccessor, BigDecimal amountToDispense, boolean shouldStartAcceptingMore) throws PeripheralException {
 		Logger.info(this, "dispense");
 		
-		
 		try {
-			setCurrency(posAccessor);
-
-			api.stopAcceptMoney();
+			AcceptMoneyStateResponse stopResp = api.stopAcceptMoney();
 
 			//TODO: For Refund, shouldn't already inserted cash be trollbacked as well. Is that taken care of in ejectInsertedCash, or should this be taken
 			// care of here as well?
-			
-			DispenseMoneyResponse resp = api.dispenseMoney(getAmountInSmallestDenomination(dispenseAmount),this.currency);
+			setCurrency(posAccessor);			
+			DispenseMoneyResponse resp = api.dispenseMoney(getAmountInSmallestDenomination(amountToDispense),this.currency);
 
+			// We must begin accepting cash again, otherwise there can be aa problem with a mixed refund receipt
+			beginAcceptingCash(posAccessor);			
 			
 			/* 
 			 * Check if success
@@ -218,7 +219,7 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 			 * 2 – NotEnoughMoney
 			 */
 			if (resp != null && resp.getStatus() == 0) {
-				if (acceptMoreMoney) {
+				if (shouldStartAcceptingMore) {
 					beginAcceptingCash(posAccessor);				
 				}
 			} else {
@@ -235,7 +236,7 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 	}
 
 	@Override
-	public boolean ejectInsertedCash(PosAccessor posAccessor, boolean arg1) throws PeripheralException {
+	public boolean ejectInsertedCash(PosAccessor posAccessor, boolean shouldStartAcceptingMore) throws PeripheralException {
 		Logger.info(this, "ejectInsertedCash");
 		
 		try {
@@ -251,56 +252,56 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 	}
 
 	@Override
-	public void endDeposit(PosAccessor arg0, int arg1) throws PeripheralException {
+	public void endDeposit(PosAccessor posAccessor, int type) throws PeripheralException {
 		Logger.info(this, "endDeposit");
 		
 		// Do nothing?
 	}
 
 	@Override
-	public BigDecimal endReplenish(PosAccessor arg0) throws PeripheralException {
+	public BigDecimal endReplenish(PosAccessor posAccessor) throws PeripheralException {
 		Logger.info(this, "endReplenish");
 		return null;
 	}
 
 	@Override
-	public void exchange(PosAccessor arg0, CashExchangeData arg1) throws PeripheralException {
+	public void exchange(PosAccessor posAccessor, CashExchangeData exchangeData) throws PeripheralException {
 		Logger.info(this, "exchange");
 		
 	}
 
 	@Override
-	public void fixDeposit(PosAccessor arg0) throws PeripheralException {
+	public void fixDeposit(PosAccessor posAccessor) throws PeripheralException {
 		Logger.info(this, "fixDeposit");
 		
 	}
 
 	@Override
-	public List<CashChangerDenomination> getCashCounts(PosAccessor arg0) throws PeripheralException {
+	public List<CashChangerDenomination> getCashCounts(PosAccessor posAccessor) throws PeripheralException {
 		Logger.info(this, "getCashCounts");
 		return null;
 	}
 
 	@Override
-	public CashbackActionType getCashbackActionType(PosAccessor arg0) {
-		Logger.info(this, "getCashbackActionType");
+	public CashbackActionType getCashbackActionType(PosAccessor posAccessor) {
+		Logger.info(this, "getCashbackActionType");		
 		return CashbackActionType.POST_TENDER;
 	}
 
 	@Override
-	public int getDeviceStatus(PosAccessor arg0) throws PeripheralException {
+	public int getDeviceStatus(PosAccessor posAccessor) throws PeripheralException {
 		Logger.info(this, "getDeviceStatus");
 		return 0;
 	}
 
 	@Override
-	public BigDecimal getFixedAmount(PosAccessor arg0) {
+	public BigDecimal getFixedAmount(PosAccessor posAccessor) {
 		Logger.info(this, "getFixedAmount");
 		return null;
 	}
 
 	@Override
-	public int getFullStatus(PosAccessor arg0) throws PeripheralException {
+	public int getFullStatus(PosAccessor posAccessor) throws PeripheralException {
 		Logger.info(this, "getFullStatus");
 		return 0;
 	}
@@ -312,38 +313,39 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 	}
 
 	@Override
-	public BigDecimal getPeekAmount(PosAccessor arg0) {
+	public BigDecimal getPeekAmount(PosAccessor posAccessor) {
 		Logger.info(this, "getPeekAmount");
 		return null;
 	}
 
 	@Override
-	public void handleOverdispenseExeption(PosAccessor arg0, CashChangerOverdispenceException arg1, Transaction arg2,
-			Session arg3) {
+	public void handleOverdispenseExeption(PosAccessor posAccessor, CashChangerOverdispenceException e, Transaction involvedTransaction,
+			Session session) {
 		Logger.info(this, "handleOverdispenseExeption");
 		
+		posAccessor.getUI().getCashierPrompter().showErrorMessage("CashChanger", "Cannot dispense change");		
 	}
 
 	@Override
-	public void lockSafe(PosAccessor arg0) throws PeripheralException {
+	public void lockSafe(PosAccessor posAccessor) throws PeripheralException {
 		Logger.info(this, "lockSafe");
 		
 	}
 
 	@Override
-	public void noteTransfer(PosAccessor arg0) throws PeripheralException {
+	public void noteTransfer(PosAccessor posAccessor) throws PeripheralException {
 		Logger.info(this, "noteTransfer");
 		
 	}
 
 	@Override
-	public void openCover(PosAccessor arg0) throws PeripheralException {
+	public void openCover(PosAccessor posAccessor) throws PeripheralException {
 		Logger.info(this, "openCover");
 		
 	}
 
 	@Override
-	public Object operation(PosAccessor arg0, String arg1) throws PeripheralException {
+	public Object operation(PosAccessor posAccessor, String operation) throws PeripheralException {
 		Logger.info(this, "operation");
 		return null;
 	}
@@ -368,45 +370,55 @@ public class FujitsuCashChangerAdapter implements CashChangerAdapter {
 	}
 
 	@Override
-	public BigDecimal pickup(PosAccessor arg0) throws PeripheralException {
+	public BigDecimal pickup(PosAccessor posAccessor) throws PeripheralException {
 		Logger.info(this, "pickup");
 		return null;
 	}
 
 	@Override
-	public BigDecimal pickup(PosAccessor arg0, Collection<CashChangerDenomination> arg1) throws PeripheralException {
+	public BigDecimal pickup(PosAccessor posAccessor, Collection<CashChangerDenomination> targetLevels) throws PeripheralException {
 		Logger.info(this, "pickup");
 		return null;
 	}
 
 	@Override
-	public void releaseSafe(PosAccessor arg0) throws PeripheralException {
+	public void releaseSafe(PosAccessor posAccessor) throws PeripheralException {
 		Logger.info(this, "releaseSafe");
 		
 	}
 
 	@Override
-	public void secureCash(PosAccessor arg0, String arg1) throws PeripheralException {
+	public void secureCash(PosAccessor posAccessor, String secureLevel) throws PeripheralException {
 		Logger.info(this, "secureCash");
 		
 	}
 
 	@Override
-	public void setFixedAmount(PosAccessor arg0, BigDecimal arg1) {
+	public void setFixedAmount(PosAccessor posAccessor, BigDecimal fixedAmount) {
 		Logger.info(this, "setFixedAmount");
 		
 	}
 
 	@Override
-	public void setPeekAmount(PosAccessor arg0, BigDecimal arg1) {
+	public void setPeekAmount(PosAccessor posAccessor, BigDecimal peekAmount) {
 		Logger.info(this, "setPeekAmount");
 		
 	}
 
 	@Override
-	public void weakInitialiseDevice(PosAccessor arg0) throws PeripheralException {
+	public void weakInitialiseDevice(PosAccessor posAccessor) throws PeripheralException {
 		Logger.info(this, "weakInitialiseDevice");
 		
+	}
+
+	@Override
+	public void afterOrderFinalized(AfterOrderFinalizedContext context, PosAccessor posAccessor) {
+		try {
+			AcceptMoneyStateResponse stopResp = api.stopAcceptMoney();
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
 	}
 
 }
