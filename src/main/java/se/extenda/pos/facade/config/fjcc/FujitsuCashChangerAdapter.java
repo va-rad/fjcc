@@ -10,6 +10,11 @@ import javax.annotation.PostConstruct;
 
 import org.springframework.stereotype.Component;
 
+import se.extenda.cashchanger.adapter.fujitsu.api.FujitsuApi;
+import se.extenda.cashchanger.adapter.fujitsu.api.FujitsuApiImpl;
+import se.extenda.cashchanger.adapter.fujitsu.response.AcceptMoneyStateResponse;
+import se.extenda.cashchanger.adapter.fujitsu.response.CashUnit;
+import se.extenda.cashchanger.adapter.fujitsu.response.DispenseMoneyResponse;
 import se.extenda.pos.facade.api.Currency;
 import se.extenda.pos.facade.api.Logger;
 import se.extenda.pos.facade.api.PosAccessor;
@@ -22,11 +27,6 @@ import se.extenda.pos.facade.spi.peripherals.cashchanger.CashChangerOverdispence
 import se.extenda.pos.facade.spi.peripherals.cashchanger.CashExchangeData;
 import se.extenda.pos.facade.spi.peripherals.cashchanger.CashbackActionType;
 import se.extenda.pos.facade.spi.peripherals.cashchanger.PeripheralException;
-import se.extenda.sco.adapter.fujitsu.api.FujitsuApi;
-import se.extenda.sco.adapter.fujitsu.api.FujitsuApiImpl;
-import se.extenda.sco.adapter.fujitsu.response.AcceptMoneyStateResponse;
-import se.extenda.sco.adapter.fujitsu.response.CashUnit;
-import se.extenda.sco.adapter.fujitsu.response.DispenseMoneyResponse;
 
 @Component
 public class FujitsuCashChangerAdapter implements CashChangerAdapter {
